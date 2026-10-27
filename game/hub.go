@@ -68,6 +68,8 @@ type Player struct {
 	kills    int
 	deaths   int
 	lastFire time.Time
+	// lastMissile is when they last fired a missile.
+	lastMissile time.Time
 
 	// Assault mode only.
 	team    string
@@ -90,6 +92,9 @@ type bullet struct {
 	origin  vec3
 	dir     vec3
 	firedAt time.Time
+	// target is the player (or, in the assault, the mothership) a missile
+	// homes on; empty for a bullet.
+	target string
 }
 
 // Hub owns the state of the one running game. Positions are client
@@ -151,9 +156,8 @@ func (h *Hub) tick() {
 	defer h.mu.Unlock()
 
 	now := h.now()
-	ttl := h.bulletTtl()
 	for id, b := range h.bullets {
-		if now.Sub(b.firedAt) > ttl {
+		if now.Sub(b.firedAt) > projectileTtl(h.settings, b) {
 			delete(h.bullets, id)
 		}
 	}
@@ -168,12 +172,6 @@ func (h *Hub) tick() {
 	if len(states) > 0 {
 		h.broadcastLocked(snapshotMsg{Type: msgSnapshot, Players: states}, "")
 	}
-}
-
-// bulletTtl is how long a bullet is remembered: its flight time plus the
-// allowance for a hit report arriving late.
-func (h *Hub) bulletTtl() time.Duration {
-	return time.Duration(h.settings.BulletTtlMs)*time.Millisecond + time.Duration(latencyAllowance*float64(time.Second))
 }
 
 // ServeWS upgrades an HTTP request and runs the connection until it closes.
@@ -204,6 +202,11 @@ func (h *Hub) handleMessage(id string, c *client, identity Identity, data []byte
 		var msg fireMsg
 		if json.Unmarshal(data, &msg) == nil {
 			h.fire(id, msg)
+		}
+	case msgMissile:
+		var msg missileMsg
+		if json.Unmarshal(data, &msg) == nil {
+			h.launch(id, msg)
 		}
 	case msgHit:
 		var msg hitMsg
@@ -324,9 +327,38 @@ func (h *Hub) fire(id string, msg fireMsg) {
 	h.broadcastLocked(fireOutMsg{Type: msgFire, Id: bulletId, Owner: id, P: msg.P, D: dir}, id)
 }
 
+// launch fires a homing missile at the ship the shooter locked on to, if
+// their missile has reloaded and the target is somebody they can have locked
+// on to: alive, and in range.
+func (h *Hub) launch(id string, msg missileMsg) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p, ok := h.players[id]
+	if !ok || p.dead || msg.Id == "" || len(msg.Id) > maxBulletId {
+		return
+	}
+	target, ok := h.players[msg.Target]
+	if !ok || target == p || target.dead || !inLockRange(h.settings, length(sub(target.pos, p.pos))) {
+		return
+	}
+	now := h.now()
+	dir, ok := normalize(msg.D)
+	if !ok || !missileCooldownOver(h.settings, p, now) || !missileOriginOk(h.settings, p, msg.P) {
+		return
+	}
+	missileId := id + ":" + msg.Id
+	if _, exists := h.bullets[missileId]; exists {
+		return
+	}
+	p.lastMissile = now
+	h.bullets[missileId] = &bullet{owner: id, origin: msg.P, dir: dir, firedAt: now, target: target.id}
+	h.broadcastLocked(missileOutMsg{Type: msgMissile, Id: missileId, Owner: id, Target: target.id, P: msg.P, D: dir}, id)
+}
+
 // hit applies a hit reported by the shooter, if it is plausible: the bullet
 // must be the shooter's, still in flight, unused, and must have passed close
-// to where the target was.
+// to where the target was. A missile must have hit the ship it was fired at,
+// and be within its reach (see missileReaches).
 func (h *Hub) hit(id string, msg hitMsg) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -341,14 +373,22 @@ func (h *Hub) hit(id string, msg hitMsg) {
 		return
 	}
 	elapsed := h.now().Sub(b.firedAt).Seconds()
-	flight := math.Min(elapsed+latencyAllowance, float64(h.settings.BulletTtlMs)/1000)
-	end := add(b.origin, mul(b.dir, flight*h.settings.BulletSpeed))
-	if distanceToSegment(target.pos, b.origin, end) > h.settings.ShipRadius+hitTolerance {
-		return
+	damage := h.settings.BulletDamage
+	if b.missile() {
+		if target.id != b.target || !missileReaches(h.settings, b, target.pos, elapsed) {
+			return
+		}
+		damage = h.settings.MissileDamage
+	} else {
+		flight := math.Min(elapsed+latencyAllowance, float64(h.settings.BulletTtlMs)/1000)
+		end := add(b.origin, mul(b.dir, flight*h.settings.BulletSpeed))
+		if distanceToSegment(target.pos, b.origin, end) > h.settings.ShipRadius+hitTolerance {
+			return
+		}
 	}
 
 	delete(h.bullets, bulletId)
-	target.life = math.Max(0, target.life-h.settings.BulletDamage)
+	target.life = math.Max(0, target.life-damage)
 	h.broadcastLocked(damageMsg{Type: msgDamage, Target: target.id, From: id, BulletId: bulletId, Life: target.life}, "")
 	if target.life > 0 {
 		return

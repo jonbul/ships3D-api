@@ -1,7 +1,28 @@
 CHANGES
 =======
-Unreleased
+Version 0.9.0 - 2026-10-27
 ------------------
+Homing missiles, for ships-vue-3d 0.10.0.
+
+- A new message, `missile {id, target, p, d}`: a missile fired at the ship
+  the player locked on to. Everybody else gets it as `missile {id, owner,
+  target, p, d}`. Its hit is reported with the usual `hit`, its id as the
+  `bulletId`, and is answered with the usual `damage` (and `died`).
+- Locking on is up to the browser (keeping an enemy close to the nose, within
+  `lockAngle` and `lockRange`, for `lockTimeMs`). The server checks that the
+  target is alive, in range and somebody the player may shoot, and that the
+  missile has reloaded: one every 10 seconds.
+- A missile flies at 150 u/s (ships top out at 80), turns towards its
+  target at up to 2.5 radians a second, and runs out of fuel after 8
+  seconds. Since it doesn't fly straight, a hit is accepted when it is on
+  the ship the missile was fired at and no further away than the missile
+  could have flown.
+- A missile takes 3 life (bullets: 1). In the assault it is one hit, like a
+  bullet: an attacker's homes on the mothership, a gunner's on an attacker.
+- The new rules are in `Settings`: `lockRange`, `lockAngle`, `lockTimeMs`,
+  `missileSpeed`, `missileTurnRate`, `missileTtlMs`, `missileDamage` and
+  `missileCooldownMs`.
+
 Five new built-in ships, so guests have more to choose from: Kestrel (a
 fighter), Mule (a freighter), Lancer (an interceptor), Bulwark (a gunship) and
 Wisp (a scout).
