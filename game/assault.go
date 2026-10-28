@@ -103,11 +103,12 @@ func NewArena(settings Settings, rules AssaultRules, loadShip ShipLoader, identi
 }
 
 // roundSettings are the Settings in a round: the attackers' life and reload
-// come from the rules.
+// come from the rules, and a missile is one hit, like a bullet.
 func (a *Arena) roundSettings() Settings {
 	s := a.settings
 	s.MaxLife = a.rules.AttackerLife
 	s.FireCooldownMs = a.rules.AttackerCooldownMs
+	s.MissileDamage = s.BulletDamage
 	return s
 }
 
@@ -136,7 +137,6 @@ func (a *Arena) tick() {
 	if a.lobbyReady(now) {
 		a.startRoundLocked()
 	}
-	ttl := time.Duration(a.settings.BulletTtlMs)*time.Millisecond + time.Duration(latencyAllowance*float64(time.Second))
 	for r := range a.rounds {
 		switch r.phase {
 		case phasePlaying:
@@ -146,7 +146,7 @@ func (a *Arena) tick() {
 				continue
 			}
 			for id, b := range r.bullets {
-				if now.Sub(b.firedAt) > ttl {
+				if now.Sub(b.firedAt) > projectileTtl(a.settings, b) {
 					delete(r.bullets, id)
 				}
 			}
@@ -202,6 +202,11 @@ func (a *Arena) handleMessage(id string, c *client, identity Identity, data []by
 		var msg fireMsg
 		if json.Unmarshal(data, &msg) == nil {
 			a.fire(id, msg)
+		}
+	case msgMissile:
+		var msg missileMsg
+		if json.Unmarshal(data, &msg) == nil {
+			a.launch(id, msg)
 		}
 	case msgHit:
 		var msg hitMsg
@@ -329,7 +334,7 @@ func (a *Arena) startRoundLocked() {
 	seats := seats(gunners, a.mothershipScale)
 	for i, p := range players {
 		p.life, p.dead, p.kills, p.deaths, p.hits = settings.MaxLife, false, 0, 0, 0
-		p.vel, p.dirty, p.lastFire = vec3{}, false, time.Time{}
+		p.vel, p.dirty, p.lastFire, p.lastMissile = vec3{}, false, time.Time{}, time.Time{}
 		if i < gunners {
 			seat := seats[i]
 			p.team, p.seat = TeamGunners, &seat
@@ -492,6 +497,41 @@ func (a *Arena) fire(id string, msg fireMsg) {
 	broadcast(r, fireOutMsg{Type: msgFire, Id: bulletId, Owner: id, P: msg.P, D: dir}, id)
 }
 
+// launch fires a missile, as Hub.launch does, with teams: an attacker's
+// homes on the mothership, a gunner's on an attacker. The mothership is in
+// range when its hull is.
+func (a *Arena) launch(id string, msg missileMsg) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, r := a.playing(id)
+	if p == nil || p.dead || msg.Id == "" || len(msg.Id) > maxBulletId {
+		return
+	}
+	if msg.Target == mothershipTarget {
+		if p.team != TeamAttackers || !a.hull.sphereHits(p.pos, a.settings.LockRange+hitTolerance+a.settings.MaxSpeed) {
+			return
+		}
+	} else {
+		target, ok := r.players[msg.Target]
+		if !ok || target.dead || p.team != TeamGunners || target.team != TeamAttackers ||
+			!inLockRange(a.settings, length(sub(target.pos, p.pos))) {
+			return
+		}
+	}
+	now := a.now()
+	dir, ok := normalize(msg.D)
+	if !ok || !missileCooldownOver(a.settings, p, now) || !missileOriginOk(a.settings, p, msg.P) {
+		return
+	}
+	missileId := id + ":" + msg.Id
+	if _, exists := r.bullets[missileId]; exists {
+		return
+	}
+	p.lastMissile = now
+	r.bullets[missileId] = &bullet{owner: id, origin: msg.P, dir: dir, firedAt: now, target: msg.Target}
+	broadcast(r, missileOutMsg{Type: msgMissile, Id: missileId, Owner: id, Target: msg.Target, P: msg.P, D: dir}, id)
+}
+
 // hit applies a hit reported by the shooter, as Hub.hit does, with teams:
 // attackers can only hit the mothership, and gunners only attackers.
 func (a *Arena) hit(id string, msg hitMsg) {
@@ -509,11 +549,22 @@ func (a *Arena) hit(id string, msg hitMsg) {
 	elapsed := a.now().Sub(b.firedAt).Seconds()
 	flight := math.Min(elapsed+latencyAllowance, float64(a.settings.BulletTtlMs)/1000)
 	end := add(b.origin, mul(b.dir, flight*a.settings.BulletSpeed))
+	if b.missile() && msg.Target != b.target {
+		return
+	}
 
 	if msg.Target == mothershipTarget {
 		// The mothership never moves, so there is no latency to allow for
-		// in where it is: a small tolerance covers rounding.
-		if shooter.team != TeamAttackers || !a.hull.segmentHits(b.origin, end, 2) {
+		// in where it is: a small tolerance covers rounding. A missile
+		// must only have been able to reach its hull.
+		if shooter.team != TeamAttackers {
+			return
+		}
+		if b.missile() {
+			if !a.hull.sphereHits(b.origin, missileReach(a.settings, elapsed)+2) {
+				return
+			}
+		} else if !a.hull.segmentHits(b.origin, end, 2) {
 			return
 		}
 		delete(r.bullets, bulletId)
@@ -530,7 +581,11 @@ func (a *Arena) hit(id string, msg hitMsg) {
 	if !ok || target.dead || shooter.team != TeamGunners || target.team != TeamAttackers {
 		return
 	}
-	if distanceToSegment(target.pos, b.origin, end) > a.settings.ShipRadius+hitTolerance {
+	if b.missile() {
+		if !missileReaches(a.settings, b, target.pos, elapsed) {
+			return
+		}
+	} else if distanceToSegment(target.pos, b.origin, end) > a.settings.ShipRadius+hitTolerance {
 		return
 	}
 	delete(r.bullets, bulletId)

@@ -8,7 +8,9 @@ package game
 //   join     {shipId, name}      once, right after connecting
 //   state    {p, q, v}           own position/orientation/velocity, ~20/s
 //   fire     {id, p, d}          a bullet fired from p along unit vector d
-//   hit      {bulletId, target}  one of our bullets hit `target`
+//   missile  {id, target, p, d}  a homing missile fired from p, nose along
+//                                d, at the ship we locked on to: `target`
+//   hit      {bulletId, target}  one of our bullets (or missiles) hit `target`
 //   respawn  {}                  after death, once respawnDelayMs has passed
 //   crash    {with}              our ship ran into ship `with` (or, in the
 //                                assault, "mothership"): see crashed below
@@ -19,6 +21,7 @@ package game
 //   playerLeft   {id}
 //   snapshot     {players: [{id, p, q, v}]}  moved players, every tick
 //   fire         {id, owner, p, d}           a bullet someone else fired
+//   missile      {id, owner, target, p, d}   a missile someone else fired
 //   damage       {target, from, bulletId, life}
 //   died         {target, from}
 //   respawned    {id, life, p, q}
@@ -28,6 +31,7 @@ const (
 	msgJoin    = "join"
 	msgState   = "state"
 	msgFire    = "fire"
+	msgMissile = "missile"
 	msgHit     = "hit"
 	msgRespawn = "respawn"
 	msgCrash   = "crash"
@@ -61,6 +65,13 @@ type fireMsg struct {
 	Id string `json:"id"`
 	P  vec3   `json:"p"`
 	D  vec3   `json:"d"`
+}
+
+type missileMsg struct {
+	Id     string `json:"id"`
+	Target string `json:"target"`
+	P      vec3   `json:"p"`
+	D      vec3   `json:"d"`
 }
 
 type crashMsg struct {
@@ -132,6 +143,15 @@ type fireOutMsg struct {
 	D     vec3   `json:"d"`
 }
 
+type missileOutMsg struct {
+	Type   string `json:"type"`
+	Id     string `json:"id"`
+	Owner  string `json:"owner"`
+	Target string `json:"target"`
+	P      vec3   `json:"p"`
+	D      vec3   `json:"d"`
+}
+
 type damageMsg struct {
 	Type     string  `json:"type"`
 	Target   string  `json:"target"`
@@ -161,7 +181,7 @@ type errorMsg struct {
 
 // The assault mode (/ws/assault) uses the same messages in a round, and
 // these around it. A hit on the mothership has target "mothership", and so
-// do the damage messages it causes.
+// do the damage messages it causes; an attacker's missile can home on it too.
 //
 // Server -> client:
 //   lobby       {id, players: [{id, name, guest}], minPlayers, maxPlayers, startsInMs?}

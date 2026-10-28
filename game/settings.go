@@ -27,6 +27,20 @@ type Settings struct {
 	BulletDamage   float64 `json:"bulletDamage"`
 	FireCooldownMs int     `json:"fireCooldownMs"`
 	RespawnDelayMs int     `json:"respawnDelayMs"`
+	// Homing missiles. A ship locks on to an enemy by keeping it within
+	// LockAngle (radians) of its nose, and closer than LockRange, for
+	// LockTimeMs; it may then fire one missile every MissileCooldownMs. The
+	// missile flies at MissileSpeed, turns towards its target at up to
+	// MissileTurnRate radians a second, and runs out of fuel after
+	// MissileTtlMs.
+	LockRange         float64 `json:"lockRange"`
+	LockAngle         float64 `json:"lockAngle"`
+	LockTimeMs        int     `json:"lockTimeMs"`
+	MissileSpeed      float64 `json:"missileSpeed"`
+	MissileTurnRate   float64 `json:"missileTurnRate"`
+	MissileTtlMs      int     `json:"missileTtlMs"`
+	MissileDamage     float64 `json:"missileDamage"`
+	MissileCooldownMs int     `json:"missileCooldownMs"`
 }
 
 func DefaultSettings() Settings {
@@ -46,6 +60,15 @@ func DefaultSettings() Settings {
 		BulletDamage:   1,
 		FireCooldownMs: 150,
 		RespawnDelayMs: 3000,
+
+		LockRange:         700,
+		LockAngle:         0.2,
+		LockTimeMs:        2000,
+		MissileSpeed:      150,
+		MissileTurnRate:   2.5,
+		MissileTtlMs:      8000,
+		MissileDamage:     3,
+		MissileCooldownMs: 10000,
 	}
 }
 
