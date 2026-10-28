@@ -208,6 +208,11 @@ func (a *Arena) handleMessage(id string, c *client, identity Identity, data []by
 		if json.Unmarshal(data, &msg) == nil {
 			a.launch(id, msg)
 		}
+	case msgDodge:
+		var msg dodgeMsg
+		if json.Unmarshal(data, &msg) == nil {
+			a.dodge(id, msg)
+		}
 	case msgHit:
 		var msg hitMsg
 		if json.Unmarshal(data, &msg) == nil {
@@ -335,6 +340,7 @@ func (a *Arena) startRoundLocked() {
 	for i, p := range players {
 		p.life, p.dead, p.kills, p.deaths, p.hits = settings.MaxLife, false, 0, 0, 0
 		p.vel, p.dirty, p.lastFire, p.lastMissile = vec3{}, false, time.Time{}, time.Time{}
+		p.lastEvade = time.Time{}
 		if i < gunners {
 			seat := seats[i]
 			p.team, p.seat = TeamGunners, &seat
@@ -530,6 +536,24 @@ func (a *Arena) launch(id string, msg missileMsg) {
 	p.lastMissile = now
 	r.bullets[missileId] = &bullet{owner: id, origin: msg.P, dir: dir, firedAt: now, target: msg.Target}
 	broadcast(r, missileOutMsg{Type: msgMissile, Id: missileId, Owner: id, Target: msg.Target, P: msg.P, D: dir}, id)
+}
+
+// dodge shakes off a missile, as Hub.dodge does: an attacker evading a
+// gunner's missile.
+func (a *Arena) dodge(id string, msg dodgeMsg) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, r := a.playing(id)
+	if p == nil || p.dead {
+		return
+	}
+	b, ok := r.bullets[msg.MissileId]
+	if !ok || !dodges(a.settings, p, b, a.now()) {
+		return
+	}
+	p.lastEvade = a.now()
+	delete(r.bullets, msg.MissileId)
+	broadcast(r, missileLostMsg{Type: msgMissileLost, Id: msg.MissileId}, "")
 }
 
 // hit applies a hit reported by the shooter, as Hub.hit does, with teams:

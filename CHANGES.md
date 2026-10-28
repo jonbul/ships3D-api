@@ -1,5 +1,19 @@
 CHANGES
 =======
+Version 0.10.0 - 2026-10-28
+------------------
+Shaking off missiles, for ships-vue-3d 0.11.0.
+
+- A new message, `dodge {missileId}`: the player did an evasive roll with
+  that missile (its full id, as received in `missile`) close behind. If the
+  missile is homing on them, could by now be within `dodgeRange` (200 u) of
+  them, and their roll has reloaded (`evadeCooldownMs`, 3 s), it is shaken
+  off: forgotten, so it can't hit any more, and everybody gets
+  `missileLost {id}` to let it fly on, harmless. A roll done too early does
+  nothing.
+- `turnCooldownMs` (4 s) for the browser's new 180° turn; the server doesn't
+  check it, since it is just flying.
+
 Version 0.9.0 - 2026-10-27
 ------------------
 Homing missiles, for ships-vue-3d 0.10.0.

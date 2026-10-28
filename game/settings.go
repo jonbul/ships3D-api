@@ -41,6 +41,13 @@ type Settings struct {
 	MissileTtlMs      int     `json:"missileTtlMs"`
 	MissileDamage     float64 `json:"missileDamage"`
 	MissileCooldownMs int     `json:"missileCooldownMs"`
+	// Evasion. A ship can do an evasive barrel roll every EvadeCooldownMs;
+	// one done while a missile homing on it is within DodgeRange shakes the
+	// missile off. A 180° turn can be done every TurnCooldownMs (the server
+	// doesn't see it: it is just flying).
+	DodgeRange      float64 `json:"dodgeRange"`
+	EvadeCooldownMs int     `json:"evadeCooldownMs"`
+	TurnCooldownMs  int     `json:"turnCooldownMs"`
 }
 
 func DefaultSettings() Settings {
@@ -69,6 +76,10 @@ func DefaultSettings() Settings {
 		MissileTtlMs:      8000,
 		MissileDamage:     3,
 		MissileCooldownMs: 10000,
+
+		DodgeRange:      200,
+		EvadeCooldownMs: 3000,
+		TurnCooldownMs:  4000,
 	}
 }
 

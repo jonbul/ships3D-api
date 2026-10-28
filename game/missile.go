@@ -50,6 +50,22 @@ func inLockRange(s Settings, distance float64) bool {
 	return distance <= s.LockRange+hitTolerance+s.MaxSpeed
 }
 
+// dodges reports whether player p, doing an evasive roll now, shakes off
+// missile b: it must be homing on them, their roll must have reloaded (with
+// the usual 20% leeway), and the missile must have been able to get within
+// DodgeRange of them - the roll only works in the last moment.
+func dodges(s Settings, p *Player, b *bullet, now time.Time) bool {
+	if b.target != p.id {
+		return false
+	}
+	cooldown := time.Duration(float64(s.EvadeCooldownMs)*0.8) * time.Millisecond
+	if now.Sub(p.lastEvade) < cooldown {
+		return false
+	}
+	reach := missileReach(s, now.Sub(b.firedAt).Seconds())
+	return length(sub(p.pos, b.origin)) <= reach+s.DodgeRange+s.ShipRadius+hitTolerance
+}
+
 // missileReach is the furthest a missile can be from where it was fired,
 // `elapsed` seconds after it was, allowing for a late report.
 func missileReach(s Settings, elapsed float64) float64 {
