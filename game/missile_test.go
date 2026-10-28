@@ -135,3 +135,56 @@ func TestMissileFieldNames(t *testing.T) {
 		t.Errorf("missile = %s, want %s", frame, want)
 	}
 }
+
+func TestEvasiveRollShakesOffAMissileInTheLastMoment(t *testing.T) {
+	s := newTestServer(t)
+	shooter := s.connect(t, "?user=shooter")
+	shooterId := shooter.join("default:arrow", "")
+	target := s.connect(t, "?user=target")
+	targetId := target.join("default:hammer", "")
+	bystander := s.connect(t, "?user=bystander")
+	bystander.join("default:arrow", "")
+	shooter.place([3]float64{0, 0, 0})
+	target.place([3]float64{0, 0, 600})
+
+	s.clock.Advance(time.Second)
+	shooter.send(map[string]any{"type": msgMissile, "id": "m", "target": targetId, "p": []float64{0, 0, 0}, "d": []float64{0, 0, 1}})
+	missileId := target.expect(msgMissile)["id"]
+	if missileId != shooterId+":m" {
+		t.Fatalf("missile id %v", missileId)
+	}
+
+	// Too early: the missile is still far away. Nobody else can dodge it.
+	target.send(map[string]any{"type": msgDodge, "missileId": missileId})
+	bystander.send(map[string]any{"type": msgDodge, "missileId": missileId})
+	shooter.expectNone(msgMissileLost)
+
+	// Close: shaken off, and it can no longer hit.
+	s.clock.Advance(2500 * time.Millisecond)
+	target.send(map[string]any{"type": msgDodge, "missileId": missileId})
+	if lost := shooter.expect(msgMissileLost); lost["id"] != missileId {
+		t.Fatalf("missileLost = %v", lost)
+	}
+	bystander.expect(msgMissileLost)
+	shooter.send(map[string]any{"type": msgHit, "bulletId": "m", "target": targetId})
+	target.expectNone(msgDamage)
+
+	// The roll needs to reload before it shakes off another.
+	s.clock.Advance(time.Duration(DefaultSettings().MissileCooldownMs) * time.Millisecond)
+	shooter.send(map[string]any{"type": msgMissile, "id": "n", "target": targetId, "p": []float64{0, 0, 0}, "d": []float64{0, 0, 1}})
+	second := target.expect(msgMissile)["id"]
+	s.clock.Advance(3 * time.Second)
+	target.send(map[string]any{"type": msgDodge, "missileId": second})
+	shooter.expect(msgMissileLost)
+
+	// Another missile, from close by, straight after: the roll hasn't
+	// reloaded yet; once it has, it works.
+	bystander.place([3]float64{0, 0, 500})
+	bystander.send(map[string]any{"type": msgMissile, "id": "o", "target": targetId, "p": []float64{0, 0, 500}, "d": []float64{0, 0, 1}})
+	third := target.expect(msgMissile)["id"]
+	target.send(map[string]any{"type": msgDodge, "missileId": third})
+	shooter.expectNone(msgMissileLost)
+	s.clock.Advance(3 * time.Second)
+	target.send(map[string]any{"type": msgDodge, "missileId": third})
+	shooter.expect(msgMissileLost)
+}

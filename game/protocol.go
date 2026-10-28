@@ -11,6 +11,8 @@ package game
 //   missile  {id, target, p, d}  a homing missile fired from p, nose along
 //                                d, at the ship we locked on to: `target`
 //   hit      {bulletId, target}  one of our bullets (or missiles) hit `target`
+//   dodge    {missileId}         we did an evasive roll with missile
+//                                `missileId` (its full id, as received) close
 //   respawn  {}                  after death, once respawnDelayMs has passed
 //   crash    {with}              our ship ran into ship `with` (or, in the
 //                                assault, "mothership"): see crashed below
@@ -22,6 +24,8 @@ package game
 //   snapshot     {players: [{id, p, q, v}]}  moved players, every tick
 //   fire         {id, owner, p, d}           a bullet someone else fired
 //   missile      {id, owner, target, p, d}   a missile someone else fired
+//   missileLost  {id}                        a missile was shaken off: it
+//                                            flies straight on, harmless
 //   damage       {target, from, bulletId, life}
 //   died         {target, from}
 //   respawned    {id, life, p, q}
@@ -32,6 +36,7 @@ const (
 	msgState   = "state"
 	msgFire    = "fire"
 	msgMissile = "missile"
+	msgDodge   = "dodge"
 	msgHit     = "hit"
 	msgRespawn = "respawn"
 	msgCrash   = "crash"
@@ -41,6 +46,7 @@ const (
 	msgPlayerLeft   = "playerLeft"
 	msgSnapshot     = "snapshot"
 	msgDamage       = "damage"
+	msgMissileLost  = "missileLost"
 	msgDied         = "died"
 	msgRespawned    = "respawned"
 	msgError        = "error"
@@ -72,6 +78,15 @@ type missileMsg struct {
 	Target string `json:"target"`
 	P      vec3   `json:"p"`
 	D      vec3   `json:"d"`
+}
+
+type dodgeMsg struct {
+	MissileId string `json:"missileId"`
+}
+
+type missileLostMsg struct {
+	Type string `json:"type"`
+	Id   string `json:"id"`
 }
 
 type crashMsg struct {

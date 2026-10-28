@@ -70,6 +70,8 @@ type Player struct {
 	lastFire time.Time
 	// lastMissile is when they last fired a missile.
 	lastMissile time.Time
+	// lastEvade is when they last shook a missile off.
+	lastEvade time.Time
 
 	// Assault mode only.
 	team    string
@@ -207,6 +209,11 @@ func (h *Hub) handleMessage(id string, c *client, identity Identity, data []byte
 		var msg missileMsg
 		if json.Unmarshal(data, &msg) == nil {
 			h.launch(id, msg)
+		}
+	case msgDodge:
+		var msg dodgeMsg
+		if json.Unmarshal(data, &msg) == nil {
+			h.dodge(id, msg)
 		}
 	case msgHit:
 		var msg hitMsg
@@ -353,6 +360,22 @@ func (h *Hub) launch(id string, msg missileMsg) {
 	p.lastMissile = now
 	h.bullets[missileId] = &bullet{owner: id, origin: msg.P, dir: dir, firedAt: now, target: target.id}
 	h.broadcastLocked(missileOutMsg{Type: msgMissile, Id: missileId, Owner: id, Target: target.id, P: msg.P, D: dir}, id)
+}
+
+// dodge shakes off a missile homing on a player who did an evasive roll as
+// it closed in (see dodges): it is forgotten, so it can no longer hit, and
+// everybody is told to let it fly on.
+func (h *Hub) dodge(id string, msg dodgeMsg) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p, ok := h.players[id]
+	b, found := h.bullets[msg.MissileId]
+	if !ok || p.dead || !found || !dodges(h.settings, p, b, h.now()) {
+		return
+	}
+	p.lastEvade = h.now()
+	delete(h.bullets, msg.MissileId)
+	h.broadcastLocked(missileLostMsg{Type: msgMissileLost, Id: msg.MissileId}, "")
 }
 
 // hit applies a hit reported by the shooter, if it is plausible: the bullet
